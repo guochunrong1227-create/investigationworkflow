@@ -1,0 +1,9 @@
+{
+  "name": "咨询调研系统工作流",
+  "description": "一个集成了行业分析、现场访谈、阶段判断和辅导规划的专业咨询调研系统，支持多级账号管理及大模型辅助分析。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

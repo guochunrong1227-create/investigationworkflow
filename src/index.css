@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-200 antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-zinc-950;
+}
+/* Basic Markdown Styles */
+.prose h1 { @apply text-2xl font-bold mb-4 text-white; }
+.prose h2 { @apply text-xl font-bold mb-3 mt-6 text-white; }
+.prose h3 { @apply text-lg font-bold mb-2 mt-4 text-white; }
+.prose p { @apply mb-4 text-zinc-300 leading-relaxed; }
+.prose ul { @apply list-disc ml-6 mb-4 text-zinc-300; }
+.prose ol { @apply list-decimal ml-6 mb-4 text-zinc-300; }
+.prose li { @apply mb-1; }
+.prose strong { @apply font-bold text-emerald-500; }
+.prose blockquote { @apply border-l-4 border-emerald-500 pl-4 italic my-4 text-zinc-400; }
+.prose code { @apply bg-zinc-800 px-1.5 py-0.5 rounded text-emerald-400 font-mono text-sm; }
+.prose pre { @apply bg-zinc-950 p-4 rounded-xl border border-zinc-800 my-4 overflow-x-auto; }
+.prose pre code { @apply bg-transparent p-0 text-zinc-300; }
+
+/* PDF Export Specific Styles */
+.pdf-export-container {
+  padding: 40px;
+  color: #000000 !important;
+  background-color: #ffffff !important;
+  font-family: sans-serif;
+}
+.pdf-export-container h1 { color: #000000 !important; font-size: 24pt; margin-bottom: 20pt; border-bottom: 2px solid #10b981; padding-bottom: 10pt; }
+.pdf-export-container h2 { color: #000000 !important; font-size: 18pt; margin-top: 20pt; margin-bottom: 10pt; }
+.pdf-export-container h3 { color: #000000 !important; font-size: 14pt; margin-top: 15pt; margin-bottom: 8pt; }
+.pdf-export-container p { color: #333333 !important; font-size: 11pt; line-height: 1.6; margin-bottom: 10pt; }
+.pdf-export-container ul, .pdf-export-container ol { margin-bottom: 10pt; padding-left: 20pt; }
+.pdf-export-container li { color: #333333 !important; font-size: 11pt; margin-bottom: 5pt; }
+.pdf-export-container strong { color: #059669 !important; }
+.pdf-export-container blockquote { border-left: 4px solid #10b981; padding-left: 15pt; font-style: italic; color: #666666 !important; margin: 15pt 0; }
+.pdf-export-container pre { background-color: #f4f4f5 !important; padding: 10pt; border-radius: 5pt; border: 1px solid #e4e4e7; overflow: hidden; }
+.pdf-export-container code { background-color: #f4f4f5 !important; color: #059669 !important; padding: 2pt 4pt; border-radius: 3pt; font-family: monospace; }
