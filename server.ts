@@ -10,12 +10,21 @@ import dotenv from "dotenv";
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
 import {exec} from 'child_process';
+import puppeteer from 'puppeteer';
+import bodyParser from "body-parser";
+// const cors = require('cors');
+// const bodyParser = require('body-parser');
 
 dotenv.config();
 
 const uploadDir = "./uploads";
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
+}
+
+const pdfsDir = "./pdfs";
+if (!fs.existsSync(pdfsDir)) {
+  fs.mkdirSync(pdfsDir);
 }
 
 // Setup storage for uploads
@@ -48,6 +57,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(express.text({ type: '*/*' }));
   app.use(express.json());
 
   // Mock Database
@@ -335,6 +345,78 @@ async function startServer() {
       path: f.path
     }));
     res.json({ files: uploadedFiles });
+  });
+
+  app.post('/api/generate-pdf', async (req, res) => {
+
+    const htmlContent = req.body; // 接收完整的 HTML 字符串
+
+    // console.log(htmlContent);
+
+    if (!htmlContent) {
+      return res.status(400).send('No HTML content provided');
+    }
+
+    let browser = null;
+    try {
+      // 启动 Puppeteer（生产环境可能需要配置参数）
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'], // 在 Linux 服务器上常用
+      });
+
+      const page = await browser.newPage();
+
+      // 设置页面内容，waitUntil: 'networkidle0' 确保所有资源加载完毕
+      await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+
+      // 生成 PDF 配置（可调整）
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,        // 打印背景颜色/图片
+        margin: {
+          top: '20px',
+          bottom: '20px',
+          left: '15px',
+          right: '15px',
+        },
+      });
+
+      // ---------- 新增：保存 PDF 到服务器本地 ----------
+      // 生成唯一文件名：时间戳 + 随机字符串，避免重名
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const fileName = `report_${timestamp}_${randomStr}.pdf`;
+      const filePath = path.join(pdfsDir, fileName);
+
+      // 将 Buffer 写入文件
+      await fs.writeFile(filePath, pdfBuffer, (err) => {
+        if (err) {
+          console.error('写入失败:', err);
+        } else {
+          console.log('文件保存成功');
+        }
+      });
+
+      await browser.close();
+      
+      // console.log(`PDF saved to: ${filePath}`);
+      // 设置响应头，触发浏览器下载
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="report.pdf"',
+        'Content-Length': pdfBuffer.length,
+      });
+
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      res.status(500).send('PDF generation failed');
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
   });
 
   // Vite middleware for development

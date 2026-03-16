@@ -20,6 +20,8 @@ import { SystemSettings, Project, User } from "../types";
 import { METHODOLOGY_PROMPTS } from "../constants/methodologies";
 import { cn } from "../utils/cn";
 
+import { saveAs } from 'file-saver';
+
 export const Workflow = ({ settings, user }: { settings: SystemSettings; user: User }) => {
   const { projectId: paramProjectId } = useParams();
   const navigate = useNavigate();
@@ -169,7 +171,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     let fileContents = "";
     for (const file of uploadedFiles) {
       const ext = file.filename.split(".").pop()?.toLowerCase();
-      if (["txt", "md", "json", "csv"].includes(ext || "")) {
+      if (["txt", "md", "json", "csv","PDF","docx","xlsx","xls"].includes(ext || "")) {
         try {
           const res = await fetch(`/api/files/${file.filename}`);
           if (res.ok) {
@@ -343,6 +345,7 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
         tempDiv.style.left = "-9999px";
         tempDiv.style.top = "0";
         tempDiv.style.width = "800px";
+        // tempDiv.style.backgroundColor = "#ffffff"; // 临时背景
         tempDiv.className = "markdown-body pdf-export-container"; // Use github-markdown-css style for consistency
         
         // Add a header for the PDF
@@ -355,21 +358,88 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
             </div>
           </div>
         `;
-        
+
         const htmlContent = await marked.parse(analysis);
-        tempDiv.innerHTML = headerHtml + htmlContent;
-        document.body.appendChild(tempDiv);
 
-        const opt = {
-          margin: 15,
-          filename: `调研报告_${steps[activeStep].title}.pdf`,
-          image: { type: 'jpeg' as const, quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-          jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
-        };
+        // 内联 github-markdown-css（也可以从 CDN 引入，但内联更稳定）
+        // const markdownCss = `/* 这里粘贴 github-markdown-css 的内容，或者从 node_modules 中读取 */`;
+        // 建议从 node_modules 中复制，或者直接使用 CDN 链接（如下），但需要保证后端能访问外网。
+        // 我们这里使用 CDN 链接，同时添加 fallback
+        const cdnLink = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">';
 
-        await html2pdf().set(opt).from(tempDiv).save();
-        document.body.removeChild(tempDiv);
+
+        const fullHtml = `<!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>调研报告</title>
+            ${cdnLink}
+            <style>
+              /* 额外的自定义样式 */
+              body {
+                padding: 20px;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+              }
+              .markdown-body {
+                box-sizing: border-box;
+                min-width: 200px;
+                max-width: 980px;
+                margin: 0 auto;
+                padding: 45px;
+              }
+              @media print {
+                body { background: white; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="markdown-body">
+              ${headerHtml}
+              ${htmlContent}
+            </div>
+          </body>
+          </html>
+            `;
+
+        console.log(fullHtml);
+        const response = await fetch('/api/generate-pdf', 
+        { // 替换为实际后端地址
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+          },
+          body: fullHtml,
+        });
+
+        if (!response.ok) {
+          throw new Error('PDF generation failed');
+        }
+
+        // 4. 获取 PDF blob 并触发下载
+        const blob = await response.blob();
+        // saveAs(blob, `调研报告_${steps[activeStep].title}.pdf`); // 使用 file-saver
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'report.pdf';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+
+        // tempDiv.innerHTML = headerHtml + htmlContent;
+        // document.body.appendChild(tempDiv);
+
+        // const opt = {
+        //   margin: 15,
+        //   filename: `调研报告_${steps[activeStep].title}.pdf`,
+        //   image: { type: 'jpeg' as const, quality: 0.98 },
+        //   html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff',logging:true },
+        //   jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+        // };
+
+        // await html2pdf().set(opt).from(tempDiv).save();
+        // document.body.removeChild(tempDiv);
       } catch (err) {
         console.error("PDF Export Error:", err);
         alert("PDF 导出失败，请重试");
