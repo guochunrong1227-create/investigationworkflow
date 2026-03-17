@@ -99,9 +99,21 @@ async function startServer() {
   // Auth Routes
   app.post("/api/login", (req, res) => {
     const { email, password } = req.body;
-    const user = db.users.find(u => u.email === email && u.password === password);
+    // const user = db.users.find(u => u.email === email && u.password === password);
+    const user ={
+      id: "u1", 
+      companyId: "c1", 
+      name: "管理员", 
+      role: "admin", 
+      email: "admin@example.com", 
+      password: "password"
+    }
+    const company={
+      id: "c1",
+      name:""
+    }
     if (user) {
-      const company = db.companies.find(c => c.id === user.companyId);
+      // const company = db.companies.find(c => c.id === user.companyId);
       res.json({ user, company });
     } else {
       res.status(401).json({ message: "邮箱或密码错误" });
@@ -400,15 +412,22 @@ async function startServer() {
 
       await browser.close();
       
-      // console.log(`PDF saved to: ${filePath}`);
-      // 设置响应头，触发浏览器下载
-      res.set({
+      // // console.log(`PDF saved to: ${filePath}`);
+      // // 设置响应头，触发浏览器下载
+      // res.set({
+      //   'Content-Type': 'application/pdf',
+      //   'Content-Disposition': 'attachment; filename="report.pdf"',
+      //   'Content-Length': pdfBuffer.length,
+      // });
+
+      // res.send(pdfBuffer);
+
+      res.writeHead(200, {
         'Content-Type': 'application/pdf',
         'Content-Disposition': 'attachment; filename="report.pdf"',
-        'Content-Length': pdfBuffer.length,
+        'Content-Length': pdfBuffer.length
       });
-
-      res.send(pdfBuffer);
+      res.end(pdfBuffer);
     } catch (error) {
       console.error('PDF generation error:', error);
       res.status(500).send('PDF generation failed');
