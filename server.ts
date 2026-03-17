@@ -57,8 +57,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.text({ type: '*/*' }));
   app.use(express.json());
+  app.use(express.text({ type: '*/*' }));
 
   // Mock Database
   const dbPath = "./data";
@@ -92,6 +92,15 @@ async function startServer() {
     db.projects = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
   }
 
+  const usersFile = path.join(dbPath, "users.json");
+  if (fs.existsSync(usersFile)) {
+    db.users = JSON.parse(fs.readFileSync(usersFile, "utf-8"));
+  }
+
+  const saveUsers = () => {
+    fs.writeFileSync(usersFile, JSON.stringify(db.users, null, 2));
+  };
+
   const saveProjects = () => {
     fs.writeFileSync(projectsFile, JSON.stringify(db.projects, null, 2));
   };
@@ -99,25 +108,59 @@ async function startServer() {
   // Auth Routes
   app.post("/api/login", (req, res) => {
     const { email, password } = req.body;
-    // const user = db.users.find(u => u.email === email && u.password === password);
-    const user ={
-      id: "u1", 
-      companyId: "c1", 
-      name: "管理员", 
-      role: "admin", 
-      email: "admin@example.com", 
-      password: "password"
-    }
-    const company={
-      id: "c1",
-      name:""
-    }
+    const user = db.users.find(u => u.email === email && u.password === password);
+    // const user ={
+    //   id: "u1", 
+    //   companyId: "c1", 
+    //   name: "管理员", 
+    //   role: "admin", 
+    //   email: "admin@example.com", 
+    //   password: "password"
+    // }
+    // const company={
+    //   id: "c1",
+    //   name:""
+    // }
     if (user) {
-      // const company = db.companies.find(c => c.id === user.companyId);
+      const company = db.companies.find(c => c.id === user.companyId);
       res.json({ user, company });
     } else {
       res.status(401).json({ message: "邮箱或密码错误" });
     }
+  });
+
+  // User Management Routes
+  app.get("/api/users", (req, res) => {
+    res.json(db.users);
+  });
+
+  app.get("/api/companies", (req, res) => {
+    res.json(db.companies);
+  });
+
+  app.post("/api/users", (req, res) => {
+    const { name, email, password, role, companyId } = req.body;
+    
+    if (!name || !email || !password || !role || !companyId) {
+      return res.status(400).json({ message: "请填写完整信息" });
+    }
+
+    if (db.users.find(u => u.email === email)) {
+      return res.status(409).json({ message: "该邮箱已被注册" });
+    }
+
+    const newUser = {
+      id: "u-" + Date.now(),
+      name,
+      email,
+      password,
+      role,
+      companyId
+    };
+
+    db.users.push(newUser);
+    saveUsers();
+    res.json(newUser);
   });
 
   // Project Routes
@@ -317,9 +360,10 @@ async function startServer() {
     
     // Get user specific API key if exists
     let apiKey = process.env.DEEPSEEK_API_KEY;
-    if (userId && db.settings.userApiKeys?.[userId]?.[provider]) {
-      apiKey = db.settings.userApiKeys[userId][provider];
-    }
+    console.log(apiKey)
+    // if (userId && db.settings.userApiKeys?.[userId]?.[provider]) {
+    //   apiKey = db.settings.userApiKeys[userId][provider];
+    // }
     
     try {
       if (provider === "deepseek") {
