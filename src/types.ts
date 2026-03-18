@@ -34,18 +34,18 @@ export interface SystemSettings {
       from: string;
     }
   }>;
-  notifications?: {
-    emails: string[];
-    dingtalkWebhook: string;
-    feishuWebhook: string;
-    smtp?: {
-      host: string;
-      port: number;
-      user: string;
-      pass: string;
-      from: string;
-    }
-  };
+  // notifications?: {
+  //   emails: string[];
+  //   dingtalkWebhook: string;
+  //   feishuWebhook: string;
+  //   smtp?: {
+  //     host: string;
+  //     port: number;
+  //     user: string;
+  //     pass: string;
+  //     from: string;
+  //   }
+  // };
 }
 
 export interface Project {

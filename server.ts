@@ -265,6 +265,10 @@ async function startServer() {
 
   app.get("/api/users/:userId/keys", (req, res) => {
     const { userId } = req.params;
+
+    console.log(req.params);
+    console.log(userId);
+
     const userApiKeys = db.settings.userApiKeys as any;
     const userNotifications = (db.settings as any).userNotifications || {};
     res.json({
@@ -275,7 +279,10 @@ async function startServer() {
 
   app.post("/api/users/:userId/keys", (req, res) => {
     const { userId } = req.params;
+     console.log(req.body);
     const { keys, notifications } = req.body;
+    console.log(keys);
+    console.log(notifications);
     
     if (!db.settings.userApiKeys) db.settings.userApiKeys = {};
     if (!(db.settings as any).userNotifications) (db.settings as any).userNotifications = {};
@@ -302,11 +309,16 @@ async function startServer() {
   // Notification Endpoint
   app.post("/api/notify", async (req, res) => {
     const { projectId, stepTitle, htmlContent, userId } = req.body;
+
+    console.log(userId);
+
     const project = db.projects.find((p: any) => p.id === projectId);
     if (!project) return res.status(404).json({ message: "项目不存在" });
 
     // Use user-specific notifications
     const notifications = (db.settings as any).userNotifications?.[userId];
+
+    console.log(notifications);
 
     if (!notifications) {
       return res.status(400).json({ message: "未配置通知设置" });
@@ -556,6 +568,8 @@ async function startServer() {
   // LLM Proxy Route
   app.post("/api/ai/chat", async (req, res) => {
     const { provider, messages, model, userId } = req.body;
+
+    // console.log(provider);
     
     // Get user specific API key if exists
     let apiKey = "";
@@ -570,6 +584,8 @@ async function startServer() {
       apiKey = provider === "deepseek" ? (process.env.DEEPSEEK_API_KEY || "") : (process.env.ARK_API_KEY || "");
     }
     
+    // console.log(apiKey);
+
     try {
       if (provider === "deepseek") {
         const response = await axios.post("https://api.deepseek.com/v1/chat/completions", {

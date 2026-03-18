@@ -31,7 +31,8 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
 
   const [project, setProject] = useState<Project | null>(null);
   const [activeStep, setActiveStep] = useState(0);
-  const [provider, setProvider] = useState(settings.aiProvider);
+  const [provider, setProvider] = useState<"gemini"|"deepseek"|"doubao">("deepseek");
+  // const [provider, setProvider] = useState(settings.aiProvider);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState("");
   const [cumulativeReport, setCumulativeReport] = useState("");
@@ -79,6 +80,10 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     }
   }, [activeStep, projectId]);
 
+  useEffect(() =>{
+    // handleAIAnalysis();
+    },[provider]
+  );
   const loadResult = async () => {
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/${activeStep}/load`);
@@ -188,18 +193,30 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     }
 
     const context = `
-${cumulativeReport ? `前序阶段分析总结：\n${cumulativeReport}\n\n` : ""}
-当前阶段手动输入的信息:
-${manualInput || "无"}
+      ${cumulativeReport ? `前序阶段分析总结：\n${cumulativeReport}\n\n` : ""}
+      当前阶段手动输入的信息:
+      ${manualInput || "无"}
 
-已上传的资料列表:
-${uploadedFiles.map(f => f.originalname).join(", ") || "无"}
+      已上传的资料列表:
+      ${uploadedFiles.map(f => f.originalname).join(", ") || "无"}
 
-${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
-`;
+      ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
+      `;
 
+    console.log(context);
     try {
       let content = "";
+      // const res = await fetch(`/api/users/${user.id}/keys`)
+      // // console.log(res);
+      // if (res.ok) {
+      //     const data = await res.json();
+      //     console.log(data.keys.doubao);
+      //     if (data.keys.gemini) setProvider("gemini");
+      //     if (data.keys.deepseek) setProvider("deepseek");
+      //     if (data.keys.doubao) setProvider("doubao");
+      // }
+
+      // console.log(provider);
 
       if (provider === "gemini") {
         // Fetch Gemini API Key from server
@@ -228,7 +245,7 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            provider,
+            provider: provider,
             userId: user.id,
             messages: [
               { role: "system", content: methodInfo.prompt },
