@@ -12,7 +12,7 @@ export const Dashboard = ({ user }: { user: User }) => {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const res = await fetch(`/api/projects?userId=${user.id}`);
+        const res = await fetch(`/api/projects?userId=${user.id}&role=${user.role}`);
         if (res.ok) {
           const data = await res.json();
           setProjects(data);
@@ -24,7 +24,7 @@ export const Dashboard = ({ user }: { user: User }) => {
       }
     };
     fetchProjects();
-  }, [user.id]);
+  }, [user.id, user.role]);
 
   const completedCount = projects.filter(p => p.lastStep === 3).length;
   const inProgressCount = projects.length - completedCount;
@@ -33,7 +33,9 @@ export const Dashboard = ({ user }: { user: User }) => {
     <div className="p-8">
       <header className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">工作台</h1>
-        <p className="text-zinc-500">欢迎回来，这是您的调研项目概览。</p>
+        <p className="text-zinc-500">
+          {user.role === "admin" ? "欢迎回来，管理员。这是系统所有调研项目的概览。" : "欢迎回来，这是您的调研项目概览。"}
+        </p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

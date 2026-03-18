@@ -43,6 +43,7 @@ export default function App() {
     setCompany(null);
     localStorage.removeItem("consult_user");
     localStorage.removeItem("consult_company");
+    window.location.href = "/"
   };
 
   if (!user || !company) {

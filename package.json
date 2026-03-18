@@ -29,6 +29,7 @@
     "marked": "^17.0.4",
     "motion": "^12.23.24",
     "multer": "^2.1.1",
+    "nodemailer": "^8.0.2",
     "pdf-parse": "^2.4.5",
     "puppeteer": "^24.39.1",
     "react": "^19.0.0",

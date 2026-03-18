@@ -9,13 +9,15 @@ import {
   Download, 
   Eye, 
   FileCode, 
-  FileDown 
+  FileDown,
+  Send
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 // @ts-ignore
 import html2pdf from "html2pdf.js";
 import { marked } from "marked";
+import { GoogleGenAI } from "@google/genai";
 import { SystemSettings, Project, User } from "../types";
 import { METHODOLOGY_PROMPTS } from "../constants/methodologies";
 import { cn } from "../utils/cn";
@@ -40,6 +42,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [sending, setSending] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
   const steps = [
@@ -196,22 +199,51 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
 `;
 
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          userId: user.id,
-          messages: [
-            { role: "system", content: methodInfo.prompt },
-            { role: "user", content: `请结合以下背景信息开始分析：\n${context}` }
+      let content = "";
+
+      if (provider === "gemini") {
+        // Fetch Gemini API Key from server
+        const configRes = await fetch("/api/config/gemini");
+        const { apiKey } = await configRes.json();
+        
+        if (!apiKey) {
+          throw new Error("未配置 Gemini API Key");
+        }
+
+        const genAI = new GoogleGenAI({ apiKey });
+        const response = await genAI.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [
+            { role: "user", parts: [{ text: `${methodInfo.prompt}\n\n请结合以下背景信息开始分析：\n${context}` }] }
           ],
-        }),
-      });
-      const data = await res.json();
-      const content = data.choices[0].message.content;
-      content.replaceAll('“','"').replaceAll('：',':').replaceAll('“','"')
-      setAnalysis(content);
+          config: {
+            // Increase output tokens to prevent truncation
+            maxOutputTokens: 8192,
+            temperature: 0.7,
+          }
+        });
+        content = response.text || "";
+      } else {
+        const res = await fetch("/api/ai/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider,
+            userId: user.id,
+            messages: [
+              { role: "system", content: methodInfo.prompt },
+              { role: "user", content: `请结合以下背景信息开始分析：\n${context}` }
+            ],
+          }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message || "AI 分析失败");
+        content = data.choices[0].message.content;
+      }
+
+      // Clean up content if needed
+      const cleanedContent = content.replace(/“/g, '"').replace(/”/g, '"').replace(/：/g, ':');
+      setAnalysis(cleanedContent);
       setViewMode("preview");
 
       // Automatically save after AI analysis to prevent data loss
@@ -219,7 +251,7 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          content: content,
+          content: cleanedContent,
           manualInput,
           files: uploadedFiles
         }),
@@ -417,15 +449,15 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
 
         // 4. 获取 PDF blob 并触发下载
         const blob = await response.blob();
-        // saveAs(blob, `调研报告_${steps[activeStep].title}.pdf`); // 使用 file-saver
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'report.pdf';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        saveAs(blob, `调研报告_${steps[activeStep].title}.pdf`); // 使用 file-saver
+        // const url = window.URL.createObjectURL(blob);
+        // const link = document.createElement('a');
+        // link.href = url;
+        // link.download = 'report.pdf';
+        // document.body.appendChild(link);
+        // link.click();
+        // document.body.removeChild(link);
+        // window.URL.revokeObjectURL(url);
 
         // tempDiv.innerHTML = headerHtml + htmlContent;
         // document.body.appendChild(tempDiv);
@@ -446,6 +478,67 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
       } finally {
         setExportingPdf(false);
       }
+    }
+  };
+
+  const handleNotify = async () => {
+    if (!analysis) return;
+    setSending(true);
+    try {
+      const headerHtml = `
+        <div style="margin-bottom: 30px; padding-bottom: 15px; border-bottom: 2px solid #10b981;">
+          <h1 style="margin: 0; color: #1a1a1a; font-size: 24pt;">${steps[activeStep].title}</h1>
+          <div style="color: #666; font-size: 10pt; margin-top: 8px;">
+            <div>项目名称: ${project?.name || "未命名项目"}</div>
+            <div>生成时间: ${new Date().toLocaleString()}</div>
+          </div>
+        </div>
+      `;
+
+      const htmlContent = await marked.parse(analysis);
+      const cdnLink = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css">';
+      
+      const fullHtml = `<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>调研报告</title>
+          ${cdnLink}
+          <style>
+            body { padding: 20px; font-family: sans-serif; }
+            .markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
+          </style>
+        </head>
+        <body>
+          <div class="markdown-body">
+            ${headerHtml}
+            ${htmlContent}
+          </div>
+        </body>
+        </html>`;
+
+      const res = await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          stepTitle: steps[activeStep].title,
+          htmlContent: fullHtml,
+          userId: user.id
+        })
+      });
+
+      if (res.ok) {
+        alert("报告已成功发送至配置的邮箱、钉钉和飞书！");
+      } else {
+        const data = await res.json();
+        alert(`发送失败: ${data.error || "请检查配置"}`);
+      }
+    } catch (err) {
+      console.error("Notify error:", err);
+      alert("发送过程中出现错误。");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -626,6 +719,15 @@ ${fileContents ? `上传资料的文本内容：\n${fileContents}` : ""}
                     >
                       <FileDown size={16} className={cn(exportingPdf && "animate-bounce")} />
                       {exportingPdf ? "正在生成 PDF..." : "导出 PDF"}
+                    </button>
+
+                    <button 
+                      onClick={handleNotify}
+                      disabled={sending || !analysis}
+                      className="col-span-2 flex items-center justify-center gap-2 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-xs font-bold text-emerald-500 hover:bg-emerald-500 hover:text-black transition-all disabled:opacity-50"
+                    >
+                      <Send size={16} />
+                      {sending ? "发送中..." : "发送报告 (邮件/钉钉/飞书)"}
                     </button>
                   </div>
                 </section>

@@ -5,15 +5,12 @@ import multer from "multer";
 import fs from "fs";
 import axios from "axios";
 import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 
 // import * as pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
-import {exec} from 'child_process';
 import puppeteer from 'puppeteer';
-import bodyParser from "body-parser";
-// const cors = require('cors');
-// const bodyParser = require('body-parser');
 
 dotenv.config();
 
@@ -29,10 +26,10 @@ if (!fs.existsSync(pdfsDir)) {
 
 // Setup storage for uploads
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function (_req, _file, cb) {
     cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
+  filename: function (_req, file, cb) {
     // 修复可能的文件名编码问题
     let originalName = file.originalname;
     // 检查是否所有字符都在 Latin1 范围内（码点 ≤ 255）
@@ -58,7 +55,9 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
-  app.use(express.text({ type: '*/*' }));
+  app.use(express.text({ type: 'text/plain' }));
+  app.use("/uploads", express.static(uploadDir));
+  app.use("/pdfs", express.static(pdfsDir));
 
   // Mock Database
   const dbPath = "./data";
@@ -77,7 +76,13 @@ async function startServer() {
       aiProvider: "deepseek",
       systemName: "咨询调研系统",
       exportFormat: "md",
-      userApiKeys: {}
+      globalApiKeys: {
+        deepseek: "",
+        gemini: "",
+        doubao: ""
+      },
+      userApiKeys: {},
+      userNotifications: {}
     }
   };
 
@@ -97,34 +102,32 @@ async function startServer() {
     db.users = JSON.parse(fs.readFileSync(usersFile, "utf-8"));
   }
 
-  const saveUsers = () => {
-    fs.writeFileSync(usersFile, JSON.stringify(db.users, null, 2));
-  };
-
   const saveProjects = () => {
     fs.writeFileSync(projectsFile, JSON.stringify(db.projects, null, 2));
+  };
+
+  const saveUsers = () => {
+    fs.writeFileSync(usersFile, JSON.stringify(db.users, null, 2));
   };
 
   // Auth Routes
   app.post("/api/login", (req, res) => {
     const { email, password } = req.body;
+    console.log(`Login attempt - Email: ${email}, Body:`, req.body);
+    
+    if (!email || !password) {
+      console.log("Missing email or password in request body");
+      return res.status(400).json({ message: "请提供邮箱和密码" });
+    }
+
     const user = db.users.find(u => u.email === email && u.password === password);
-    // const user ={
-    //   id: "u1", 
-    //   companyId: "c1", 
-    //   name: "管理员", 
-    //   role: "admin", 
-    //   email: "admin@example.com", 
-    //   password: "password"
-    // }
-    // const company={
-    //   id: "c1",
-    //   name:""
-    // }
+    
     if (user) {
+      console.log(`Login successful for ${email}`);
       const company = db.companies.find(c => c.id === user.companyId);
       res.json({ user, company });
     } else {
+      console.log(`Login failed for ${email} - User not found or password mismatch`);
       res.status(401).json({ message: "邮箱或密码错误" });
     }
   });
@@ -165,8 +168,14 @@ async function startServer() {
 
   // Project Routes
   app.get("/api/projects", (req, res) => {
-    const { userId } = req.query;
+    const { userId, role } = req.query;
     if (!userId) return res.status(400).json({ message: "Missing userId" });
+    
+    // If admin, return all projects, otherwise filter by userId
+    if (role === "admin") {
+      return res.json(db.projects);
+    }
+    
     const userProjects = db.projects.filter(p => p.userId === userId);
     res.json(userProjects);
   });
@@ -248,15 +257,207 @@ async function startServer() {
   });
 
   // Settings Routes
-  app.get("/api/settings", (req, res) => {
-    res.json(db.settings);
+  app.get("/api/settings", (_req, res) => {
+    // Don't leak all users' API keys or notifications
+    const { userApiKeys, userNotifications, ...publicSettings } = db.settings as any;
+    res.json(publicSettings);
+  });
+
+  app.get("/api/users/:userId/keys", (req, res) => {
+    const { userId } = req.params;
+    const userApiKeys = db.settings.userApiKeys as any;
+    const userNotifications = (db.settings as any).userNotifications || {};
+    res.json({
+      keys: userApiKeys?.[userId] || { deepseek: "", gemini: "", doubao: "" },
+      notifications: userNotifications?.[userId] || { emails: [], dingtalkWebhook: "", feishuWebhook: "" }
+    });
+  });
+
+  app.post("/api/users/:userId/keys", (req, res) => {
+    const { userId } = req.params;
+    const { keys, notifications } = req.body;
+    
+    if (!db.settings.userApiKeys) db.settings.userApiKeys = {};
+    if (!(db.settings as any).userNotifications) (db.settings as any).userNotifications = {};
+    
+    if (keys) (db.settings.userApiKeys as any)[userId] = keys;
+    if (notifications) (db.settings as any).userNotifications[userId] = notifications;
+
+    fs.writeFileSync(settingsFile, JSON.stringify(db.settings, null, 2));
+    res.json({ message: "个人设置已保存" });
   });
 
   app.post("/api/settings", (req, res) => {
-    db.settings = { ...db.settings, ...req.body };
+    // Only update global settings, preserve user data
+    const { userApiKeys, userNotifications, ...newSettings } = req.body;
+    db.settings = { ...db.settings, ...newSettings };
     fs.writeFileSync(settingsFile, JSON.stringify(db.settings, null, 2));
-    res.json({ message: "设置已保存", settings: db.settings });
+    res.json({ message: "全局设置已保存", settings: db.settings });
   });
+
+  app.get("/api/config/gemini", (req, res) => {
+    res.json({ apiKey: process.env.GEMINI_API_KEY });
+  });
+
+  // Notification Endpoint
+  app.post("/api/notify", async (req, res) => {
+    const { projectId, stepTitle, htmlContent, userId } = req.body;
+    const project = db.projects.find((p: any) => p.id === projectId);
+    if (!project) return res.status(404).json({ message: "项目不存在" });
+
+    // Use user-specific notifications
+    const notifications = (db.settings as any).userNotifications?.[userId];
+
+    if (!notifications) {
+      return res.status(400).json({ message: "未配置通知设置" });
+    }
+
+    let browser = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      const page = await browser.newPage();
+      await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+      const pdfBuffer = await page.pdf({
+        format: "A4",
+        printBackground: true,
+        margin: { top: "20px", bottom: "20px", left: "15px", right: "15px" },
+      });
+
+      const fileName = `report_${Date.now()}.pdf`;
+      const filePath = path.join(pdfsDir, fileName);
+      fs.writeFileSync(filePath, pdfBuffer);
+
+      // Send notifications using the determined settings
+      await sendNotifications(notifications, project, stepTitle, filePath, pdfBuffer);
+
+      res.json({ message: "通知已发送", pdfUrl: `/pdfs/${fileName}` });
+    } catch (error: any) {
+      console.error("Notification error:", error);
+      res.status(500).json({ error: error.message });
+    } finally {
+      if (browser) await browser.close();
+    }
+  });
+
+  async function sendNotifications(notifications: any, project: any, stepTitle: string, pdfPath: string, pdfBuffer: Buffer) {
+    if (!notifications) return;
+
+    const appUrl = process.env.APP_URL || "http://localhost:3000";
+    const pdfUrl = `${appUrl}/pdfs/${path.basename(pdfPath)}`;
+    const errors: string[] = [];
+
+    // 1. Email
+    if (notifications.emails && notifications.emails.length > 0 && notifications.smtp) {
+      const { host, port, user, pass, from } = notifications.smtp;
+      
+      console.log(notifications.smtp);
+
+      if (!host || !user || !pass || !from) {
+        console.error("Email configuration incomplete");
+        errors.push("邮件配置不完整");
+      } else {
+        const transporter = nodemailer.createTransport({
+          host: host,
+          port: 465,
+          secure: true,
+          // requireTLS: true,
+          auth: {
+            user: user,
+            pass: pass,
+          },
+          tls: {
+            rejectUnauthorized: false
+          },
+          connectionTimeout: 20000,
+          // logger:true,
+          // debug:true
+        });
+
+        try {
+
+          console.log(notifications.emails);
+
+          await transporter.sendMail({
+            from: from || user,
+            to: notifications.emails.join(","),
+            subject: `【调研报告】${project.name} - ${stepTitle}`,
+            text: `您好，项目《${project.name}》的阶段报告《${stepTitle}》已生成。\n\n查看链接：${pdfUrl}`,
+            attachments: [
+              {
+                filename: `${stepTitle}.pdf`,
+                content: pdfBuffer,
+              },
+            ],
+          });
+          console.log(`Email sent successfully to ${notifications.emails.join(",")}`);
+        } catch (err: any) {
+          console.error("Email error details:", err);
+          errors.push(`邮件发送失败: ${err.message}`);
+        }
+      }
+    }
+
+    // 2. DingTalk
+    if (notifications.dingtalkWebhook) {
+      try {
+        await axios.post(notifications.dingtalkWebhook, {
+          msgtype: "markdown",
+          markdown: {
+            title: `调研报告: ${project.name}`,
+            text: `### 调研报告已生成\n\n**项目名称**: ${project.name}\n**阶段**: ${stepTitle}\n\n[点击查看 PDF 报告](${pdfUrl})`
+          }
+        });
+      } catch (err: any) {
+        console.error("DingTalk error:", err);
+        errors.push(`钉钉发送失败: ${err.message}`);
+      }
+    }
+
+    // 3. Feishu
+    if (notifications.feishuWebhook) {
+      try {
+        await axios.post(notifications.feishuWebhook, {
+          msg_type: "interactive",
+          card: {
+            header: {
+              title: { tag: "plain_text", content: `调研报告: ${project.name}` },
+              template: "blue"
+            },
+            elements: [
+              {
+                tag: "div",
+                text: {
+                  tag: "lark_md",
+                  content: `**项目名称**: ${project.name}\n**阶段**: ${stepTitle}\n报告已生成，请点击下方按钮查看。`
+                }
+              },
+              {
+                tag: "action",
+                actions: [
+                  {
+                    tag: "button",
+                    text: { tag: "plain_text", content: "查看 PDF 报告" },
+                    url: pdfUrl,
+                    type: "primary"
+                  }
+                ]
+              }
+            ]
+          }
+        });
+      } catch (err: any) {
+        console.error("Feishu error:", err);
+        errors.push(`飞书发送失败: ${err.message}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
+  }
 
   // Results Routes
   app.post("/api/projects/:projectId/steps/:stepIdx/save", (req, res) => {
@@ -310,12 +511,10 @@ async function startServer() {
             {
                 // PDF 提取文本
                 const dataBuffer = fs.readFileSync(filePath);
-                // 使用动态导入确保正确获取类
-                const { PDFParse } = await import('pdf-parse');
-                const parser = new PDFParse({ data: dataBuffer });
-                const result = await parser.getText();
-                console.log(result);
-                res.json({result});
+                const pdfModule: any = await import('pdf-parse');
+                const pdf = pdfModule.default || pdfModule;
+                const data = await pdf(dataBuffer);
+                res.json({ content: data.text });
             }else if (ext === ".docx"){
                 // Word 提取文本
                 const result = await mammoth.extractRawText({ path: filePath });
@@ -329,8 +528,8 @@ async function startServer() {
                 const sheet = workbook.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
                 sheetTexts.push(`【工作表：${sheetName}】`);
-                rows.forEach((row: any[]) => {
-                  const line = row.filter(cell => cell !== "").join(" | ");
+                rows.forEach((row: any) => {
+                  const line = (row as any[]).filter(cell => cell !== "").join(" | ");
                   if (line) sheetTexts.push(line);
                 });
               }
@@ -359,17 +558,36 @@ async function startServer() {
     const { provider, messages, model, userId } = req.body;
     
     // Get user specific API key if exists
-    let apiKey = process.env.DEEPSEEK_API_KEY;
-    console.log(apiKey)
-    // if (userId && db.settings.userApiKeys?.[userId]?.[provider]) {
-    //   apiKey = db.settings.userApiKeys[userId][provider];
-    // }
+    let apiKey = "";
+    const userApiKeys = db.settings.userApiKeys as any;
+    const globalApiKeys = (db.settings as any).globalApiKeys || {};
+
+    if (userId && userApiKeys?.[userId]?.[provider]) {
+      apiKey = userApiKeys[userId][provider];
+    } else if (globalApiKeys[provider]) {
+      apiKey = globalApiKeys[provider];
+    } else {
+      apiKey = provider === "deepseek" ? (process.env.DEEPSEEK_API_KEY || "") : (process.env.ARK_API_KEY || "");
+    }
     
     try {
       if (provider === "deepseek") {
         const response = await axios.post("https://api.deepseek.com/v1/chat/completions", {
           model: model || "deepseek-chat",
           messages: messages,
+          max_tokens: 8192,
+        }, {
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          }
+        });
+        return res.json(response.data);
+      } else if (provider === "doubao") {
+        const response = await axios.post("https://ark.cn-beijing.volces.com/api/v3/chat/completions", {
+          model: model || "ep-20260317140827-fwhqn", // 默认模型或用户提供的 Endpoint ID
+          messages: messages,
+          max_tokens: 8192,
         }, {
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -492,7 +710,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
