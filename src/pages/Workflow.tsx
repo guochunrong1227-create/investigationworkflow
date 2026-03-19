@@ -27,7 +27,7 @@ import { saveAs } from 'file-saver';
 export const Workflow = ({ settings, user }: { settings: SystemSettings; user: User }) => {
   const { projectId: paramProjectId } = useParams();
   const navigate = useNavigate();
-  const projectId = paramProjectId || "default-project";
+  const projectId = paramProjectId; //|| "default-project";
 
   const [project, setProject] = useState<Project | null>(null);
   const [activeStep, setActiveStep] = useState(0);

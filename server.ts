@@ -266,8 +266,8 @@ async function startServer() {
   app.get("/api/users/:userId/keys", (req, res) => {
     const { userId } = req.params;
 
-    console.log(req.params);
-    console.log(userId);
+    // console.log(req.params);
+    // console.log(userId);
 
     const userApiKeys = db.settings.userApiKeys as any;
     const userNotifications = (db.settings as any).userNotifications || {};
@@ -279,10 +279,10 @@ async function startServer() {
 
   app.post("/api/users/:userId/keys", (req, res) => {
     const { userId } = req.params;
-     console.log(req.body);
+    //  console.log(req.body);
     const { keys, notifications } = req.body;
-    console.log(keys);
-    console.log(notifications);
+    // console.log(keys);
+    // console.log(notifications);
     
     if (!db.settings.userApiKeys) db.settings.userApiKeys = {};
     if (!(db.settings as any).userNotifications) (db.settings as any).userNotifications = {};
