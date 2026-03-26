@@ -31,7 +31,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
 
   const [project, setProject] = useState<Project | null>(null);
   const [activeStep, setActiveStep] = useState(0);
-  const [provider, setProvider] = useState<"gemini"|"deepseek"|"doubao">("deepseek");
+  const [provider, setProvider] = useState<"gemini"|"deepseek"|"doubao">("doubao");
   // const [provider, setProvider] = useState(settings.aiProvider);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState("");
@@ -50,6 +50,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     { title: "行业分析", desc: "全面了解行业，判断容量、规划、周期。" },
     { title: "现场访谈", desc: "收集高层看法，识别问题与愿景。" },
     { title: "阶段判断", desc: "判断企业所处阶段，识别结构性矛盾。" },
+    { title: "决策建模", desc: "设计战略取舍与优先级。"},
     { title: "辅导规划", desc: "设计咨询方案，形成路演报告。" }
   ];
 

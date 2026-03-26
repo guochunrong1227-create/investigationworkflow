@@ -196,7 +196,7 @@ async function startServer() {
     const resultsDir = path.join(dbPath, "results", projectId);
     let fullReport = "";
     
-    const stepTitles = ["行业分析", "现场访谈", "阶段判断", "辅导规划"];
+    const stepTitles = ["行业分析", "现场访谈", "阶段判断", "决策建模","辅导规划"];
     
     for (let i = 0; i <= limit; i++) {
       const filePath = path.join(resultsDir, `step_${i}.json`);
@@ -591,7 +591,7 @@ async function startServer() {
         const response = await axios.post("https://api.deepseek.com/v1/chat/completions", {
           model: model || "deepseek-chat",
           messages: messages,
-          max_tokens: 8192,
+          max_tokens: 16384,
         }, {
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -603,7 +603,7 @@ async function startServer() {
         const response = await axios.post("https://ark.cn-beijing.volces.com/api/v3/chat/completions", {
           model: model || "ep-20260317140827-fwhqn", // 默认模型或用户提供的 Endpoint ID
           messages: messages,
-          max_tokens: 8192,
+          max_tokens: 16384,
         }, {
           headers: {
             "Authorization": `Bearer ${apiKey}`,
