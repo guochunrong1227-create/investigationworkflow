@@ -21,8 +21,8 @@ import { GoogleGenAI } from "@google/genai";
 import { SystemSettings, Project, User } from "../types";
 import { METHODOLOGY_PROMPTS } from "../constants/methodologies";
 import { cn } from "../utils/cn";
-
 import { saveAs } from 'file-saver';
+import { auditAnalysis, AuditResult } from "../services/audit/auditService";
 
 export const Workflow = ({ settings, user }: { settings: SystemSettings; user: User }) => {
   const { projectId: paramProjectId } = useParams();
@@ -35,6 +35,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
   // const [provider, setProvider] = useState(settings.aiProvider);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState("");
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const [cumulativeReport, setCumulativeReport] = useState("");
   const [showCumulative, setShowCumulative] = useState(false);
   const [manualInput, setManualInput] = useState("");
@@ -86,6 +87,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     },[provider]
   );
   const loadResult = async () => {
+    setAuditResult(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/steps/${activeStep}/load`);
       if (res.ok) {
@@ -207,56 +209,70 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
     console.log(context);
     try {
       let content = "";
-      // const res = await fetch(`/api/users/${user.id}/keys`)
-      // // console.log(res);
-      // if (res.ok) {
-      //     const data = await res.json();
-      //     console.log(data.keys.doubao);
-      //     if (data.keys.gemini) setProvider("gemini");
-      //     if (data.keys.deepseek) setProvider("deepseek");
-      //     if (data.keys.doubao) setProvider("doubao");
-      // }
+      let currentAuditResult: AuditResult | null = null;
+      let retryCount = 0;
+      const maxRetries = 1; // Allow one automatic retry with feedback
 
-      // console.log(provider);
+      const generateContent = async (feedback?: string) => {
+        if (provider === "gemini") {
+          const configRes = await fetch("/api/config/gemini");
+          const { apiKey } = await configRes.json();
+          if (!apiKey) throw new Error("未配置 Gemini API Key");
 
-      if (provider === "gemini") {
-        // Fetch Gemini API Key from server
-        const configRes = await fetch("/api/config/gemini");
-        const { apiKey } = await configRes.json();
-        
-        if (!apiKey) {
-          throw new Error("未配置 Gemini API Key");
-        }
-
-        const genAI = new GoogleGenAI({ apiKey });
-        const response = await genAI.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [
-            { role: "user", parts: [{ text: `${methodInfo.prompt}\n\n请结合以下背景信息开始分析：\n${context}` }] }
-          ],
-          config: {
-            // Increase output tokens to prevent truncation
-            maxOutputTokens: 8192,
-            temperature: 0.7,
-          }
-        });
-        content = response.text || "";
-      } else {
-        const res = await fetch("/api/ai/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: provider,
-            userId: user.id,
-            messages: [
-              { role: "system", content: methodInfo.prompt },
-              { role: "user", content: `请结合以下背景信息开始分析：\n${context}` }
+          const genAI = new GoogleGenAI({ apiKey });
+          const response = await genAI.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: [
+              { 
+                role: "user", 
+                parts: [{ 
+                  text: `${methodInfo.prompt}\n\n请结合以下背景信息开始分析：\n${context}${feedback ? `\n\n注意：上一次生成未通过审计，请根据以下建议改进：\n${feedback}` : ""}` 
+                }] 
+              }
             ],
-          }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message || "AI 分析失败");
-        content = data.choices[0].message.content;
+            config: { maxOutputTokens: 8192, temperature: 0.7 }
+          });
+          return response.text || "";
+        } else {
+          const res = await fetch("/api/ai/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              provider: provider,
+              userId: user.id,
+              messages: [
+                { role: "system", content: methodInfo.prompt },
+                { 
+                  role: "user", 
+                  content: `请结合以下背景信息开始分析：\n${context}${feedback ? `\n\n注意：上一次生成未通过审计，请根据以下建议改进：\n${feedback}` : ""}` 
+                }
+              ],
+            }),
+          });
+          const data = await res.json();
+          if (data.error) throw new Error(data.error.message || "AI 分析失败");
+          return data.choices[0].message.content;
+        }
+      };
+
+      // Initial generation
+      content = await generateContent();
+      
+      // Audit Step
+      console.log("Starting audit for step:", activeStep);
+      currentAuditResult = await auditAnalysis(activeStep, content, provider, user.id);
+      console.log("Audit result received:", currentAuditResult);
+      setAuditResult(currentAuditResult);
+
+      // Automatic retry if audit fails
+      if (!currentAuditResult.passed && retryCount < maxRetries) {
+        console.log("Audit failed, retrying with feedback...");
+        retryCount++;
+        content = await generateContent(currentAuditResult.suggestions);
+        console.log("Retry generation complete, auditing again...");
+        currentAuditResult = await auditAnalysis(activeStep, content, provider, user.id);
+        console.log("Retry audit result received:", currentAuditResult);
+        setAuditResult(currentAuditResult);
       }
 
       // Clean up content if needed
@@ -576,7 +592,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
             {["deepseek", "gemini", "doubao"].map((p) => (
               <button
                 key={p}
-                onClick={() => setProvider(p)}
+                onClick={() => setProvider(p as "gemini" | "deepseek" | "doubao")}
                 className={cn(
                   "px-4 py-2 rounded-lg text-sm font-medium transition-all",
                   provider === p ? "bg-emerald-500 text-black" : "text-zinc-400 hover:text-white"
@@ -667,7 +683,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
               <div className="lg:col-span-1 space-y-6">
                 <section>
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">手动输入信息</h4>
-                  <textarea 
+                  <textarea id="textarea1"
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
                     className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 resize-none"
@@ -755,6 +771,17 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-4">
                     <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">分析结果查看器</h4>
+                    {auditResult && (
+                      <div className={cn(
+                        "flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold transition-all animate-in fade-in slide-in-from-left-2",
+                        auditResult.passed ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
+                      )}>
+                        <Brain size={14} className={cn(auditResult.passed ? "text-emerald-500" : "text-red-500")} />
+                        <span>审计评分: {auditResult.score}</span>
+                        <span className="w-1 h-1 rounded-full bg-current opacity-30" />
+                        <span>{auditResult.passed ? "审计通过" : "审计未通过"}</span>
+                      </div>
+                    )}
                     {activeStep > 0 && (
                       <button 
                         onClick={() => setShowCumulative(!showCumulative)}
@@ -784,6 +811,28 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
                 </div>
                 
                 <div className="bg-zinc-950 rounded-2xl border border-zinc-800 min-h-[400px] overflow-hidden flex flex-col">
+                  {auditResult && !auditResult.passed && (
+                    <div className="p-6 bg-red-500/5 border-b border-red-500/10">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-red-500/10 rounded-lg text-red-500">
+                          <Brain size={16} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-red-500 mb-1">审计反馈与改进建议</p>
+                          <p className="text-xs text-zinc-400 mb-2">{auditResult.suggestions}</p>
+                          {auditResult.missingRequirements.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {auditResult.missingRequirements.map((req, i) => (
+                                <span key={i} className="px-2 py-0.5 bg-red-500/10 text-red-400 rounded text-[9px]">
+                                  缺失: {req}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {showCumulative && cumulativeReport && (
                     <div className="p-6 bg-zinc-900/30 border-b border-zinc-800 max-h-48 overflow-y-auto">
                       <p className="text-[10px] font-bold text-zinc-600 uppercase mb-2">前序阶段汇总</p>
@@ -793,7 +842,7 @@ export const Workflow = ({ settings, user }: { settings: SystemSettings; user: U
                     </div>
                   )}
                   {viewMode === "edit" ? (
-                    <textarea 
+                    <textarea id="textarea2"
                       value={analysis}
                       onChange={(e) => setAnalysis(e.target.value)}
                       className="flex-1 bg-transparent p-6 text-zinc-300 font-mono text-sm focus:outline-none resize-none"

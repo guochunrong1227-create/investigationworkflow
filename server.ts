@@ -24,6 +24,11 @@ if (!fs.existsSync(pdfsDir)) {
   fs.mkdirSync(pdfsDir);
 }
 
+const pptsDir = "./ppts";
+if (!fs.existsSync(pptsDir)) {
+  fs.mkdirSync(pptsDir);
+}
+
 // Setup storage for uploads
 const storage = multer.diskStorage({
   destination: function (_req, _file, cb) {
@@ -591,7 +596,7 @@ async function startServer() {
         const response = await axios.post("https://api.deepseek.com/v1/chat/completions", {
           model: model || "deepseek-chat",
           messages: messages,
-          max_tokens: 16384,
+          max_tokens: 8192,
         }, {
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -610,6 +615,7 @@ async function startServer() {
             "Content-Type": "application/json"
           }
         });
+        console.log(response.data);
         return res.json(response.data);
       } else if (provider === "gemini") {
         // Gemini implementation would go here using @google/genai on frontend is preferred per instructions
